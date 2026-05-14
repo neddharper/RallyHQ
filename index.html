@@ -443,9 +443,18 @@ async function initUser(user){
   CU=user;
   const {data:profile}=await sb.from('profiles').select('*').eq('id',user.id).single();
   CP=profile;
-  // Get org membership
   if(ORG){
-    const {data:om}=await sb.from('org_members').select('*').eq('org_id',ORG.id).eq('user_id',user.id).single();
+    let {data:om}=await sb.from('org_members').select('*').eq('org_id',ORG.id).eq('user_id',user.id).single();
+    // If no membership row exists yet, create a pending one
+    if(!om){
+      const {data:newOm}=await sb.from('org_members').insert({
+        org_id:ORG.id,
+        user_id:user.id,
+        role:'member',
+        status:'pending',
+      }).select().single();
+      om=newOm;
+    }
     OM=om;
   }
   showScr('app');
