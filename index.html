@@ -445,10 +445,6 @@ async function initUser(user){
   CP=profile;
   if(ORG){
     const {data:omRows, error:omErr}=await sb.from('org_members').select('*').eq('org_id',ORG.id).eq('user_id',user.id);
-    console.log('ORG:', ORG);
-    console.log('user.id:', user.id);
-    console.log('omRows:', omRows);
-    console.log('omErr:', omErr);
     let om=omRows&&omRows.length>0?omRows[0]:null;
     if(!om){
       const {data:newOm}=await sb.from('org_members').insert({
