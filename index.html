@@ -444,16 +444,16 @@ async function initUser(user){
   const {data:profile}=await sb.from('profiles').select('*').eq('id',user.id).single();
   CP=profile;
   if(ORG){
-    let {data:om}=await sb.from('org_members').select('*').eq('org_id',ORG.id).eq('user_id',user.id).single();
-    // If no membership row exists yet, create a pending one
+    const {data:omRows}=await sb.from('org_members').select('*').eq('org_id',ORG.id).eq('user_id',user.id);
+    let om=omRows&&omRows.length>0?omRows[0]:null;
     if(!om){
       const {data:newOm}=await sb.from('org_members').insert({
         org_id:ORG.id,
         user_id:user.id,
         role:'member',
         status:'pending',
-      }).select().single();
-      om=newOm;
+      }).select();
+      om=newOm&&newOm.length>0?newOm[0]:null;
     }
     OM=om;
   }
