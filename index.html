@@ -1144,9 +1144,11 @@ function renderAdminAnnouncements(){
           <div class="ann-meta">${a.division?a.division+' · ':''} ${new Date(a.created_at).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})}</div>
         </div>
         <div style="display:flex;flex-direction:column;gap:4px;flex-shrink:0">
-          <button class="btn-sm" onclick="openEditAnnouncement('${a.id}')">Edit</button>
-          ${a.pinned?`<button class="btn-sm" onclick="togglePin('${a.id}',false)">Unpin</button>`:`<button class="btn-sm" onclick="togglePin('${a.id}',true)">Pin</button>`}
-          <button class="btn-danger" onclick="deleteAnnouncement('${a.id}')">Delete</button>
+          <button class="btn-sm" style="background:rgba(255,255,255,0.15);color:var(--white);border-color:rgba(255,255,255,0.3)" onclick="openEditAnnouncement('${a.id}')">Edit</button>
+${a.pinned
+  ?`<button class="btn-sm" style="background:rgba(255,255,255,0.15);color:var(--white);border-color:rgba(255,255,255,0.3)" onclick="togglePin('${a.id}',false)">Unpin</button>`
+  :`<button class="btn-sm" style="background:rgba(255,255,255,0.15);color:var(--white);border-color:rgba(255,255,255,0.3)" onclick="togglePin('${a.id}',true)">Pin</button>`}
+<button class="btn-danger" style="border-color:rgba(255,150,150,0.6);color:rgba(255,150,150,1)" onclick="deleteAnnouncement('${a.id}')">Delete</button>
         </div>
       </div>
     </div>`).join('');
