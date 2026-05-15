@@ -196,7 +196,7 @@
     .cal-num { font-family:'Barlow Condensed',sans-serif; font-size:14px; font-weight:700; color:var(--navy); width:24px; height:24px; display:flex; align-items:center; justify-content:center; border-radius:50%; margin-bottom:4px; }
     .cal-event { font-size:10px; font-weight:600; padding:2px 5px; border-radius:3px; margin-bottom:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; cursor:pointer; font-family:'Barlow Condensed',sans-serif; letter-spacing:.02em; }
     .cal-event-training { background:rgba(75,133,141,0.15); color:var(--deep); border-left:2px solid var(--teal); }
-    .cal-event-open { background:var(--teal); color:var(--white); }
+.cal-event-tournament { background:var(--red); color:var(--white); }
     .view-toggle { display:flex; border:0.5px solid var(--bm); border-radius:var(--r2); overflow:hidden; }
     .vt-btn { padding:6px 14px; font-size:12px; font-family:'Barlow Condensed',sans-serif; font-weight:700; letter-spacing:.04em; text-transform:uppercase; border:none; background:transparent; color:var(--tx2); cursor:pointer; }
     .vt-btn.active { background:var(--navy); color:var(--white); }
@@ -615,7 +615,7 @@ const sb=createClient(
 
 // ── STATE ─────────────────────────────────────────────────────────────────────
 let CU=null,CP=null,OM=null,ORG=null;
-let allSessions=[],allMembers=[],allAnnouncements=[],allPlans=[];
+let allSessions=[],allMembers=[],allAnnouncements=[],allPlans=[],allTournaments=[];
 const ORG_SLUG='trap';
 let schedView='list';
 let calYear=new Date().getFullYear(),calMonth=new Date().getMonth();
@@ -729,6 +729,8 @@ async function loadOrgData(){
   allSessions=sessRes.data||[];
   allAnnouncements=annRes.data||[];
   allPlans=planRes.data||[];
+  const {data:tourns}=await sb.from('tournaments').select('*').eq('org_id',ORG.id).order('date',{ascending:true});
+  allTournaments=tourns||[];
   if(OM?.role==='admin'){
     const {data:members}=await sb.from('org_members').select('*,profiles(id,full_name,email)').eq('org_id',ORG.id).order('joined_at',{ascending:false});
     allMembers=members||[];
@@ -1170,9 +1172,9 @@ function renderCal(){
     const isToday=dateStr===todayStr;
     const evs=evByDate[dateStr]||[];
     const evHtml=evs.slice(0,3).map(e=>`
-      <div class="cal-event ${e.session_type==='open_play'?'cal-event-open':'cal-event-training'}"
-           onclick="event.stopPropagation();showCalDayDetail('${dateStr}')" title="${e.title}">
-        ${ft(e.start_time)} ${e.title}
+      <div class="cal-event ${e._type==='tournament'?'cal-event-tournament':e.session_type==='open_play'?'cal-event-open':'cal-event-training'}"
+           onclick="event.stopPropagation();showCalDayDetail('${dateStr}')" title="${e.name||e.title}">
+        ${e._type==='tournament'?'🏆':ft(e.start_time)} ${e.name||e.title}
       </div>`).join('');
     const more=evs.length>3?`<div style="font-size:10px;color:var(--tx3);padding:1px 4px">+${evs.length-3} more</div>`:'';
     html+=`<div class="cal-cell${isToday?' is-today':''}" onclick="showCalDayDetail('${dateStr}')">
@@ -1191,24 +1193,37 @@ function renderCal(){
 }
 
 function showCalDayDetail(dateStr){
-  const evs=allSessions.filter(s=>s.date===dateStr);
+  const sesss=allSessions.filter(s=>s.date===dateStr);
+  const tourns=(allTournaments||[]).filter(t=>t.date<=dateStr&&(!t.end_date||t.end_date>=dateStr));
+  const evs=[...sesss,...tourns.map(t=>({...t,_type:'tournament'}))];
   const detailEl=document.getElementById('cal-day-detail');
   if(!evs.length){detailEl.innerHTML='';return;}
   const dt=new Date(dateStr+'T00:00:00');
   const label=dt.toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric'});
   detailEl.innerHTML=`
     <div style="font-family:'Barlow Condensed',sans-serif;font-size:14px;font-weight:700;color:var(--tx3);letter-spacing:.06em;text-transform:uppercase;margin-bottom:10px">${label}</div>
-    ${evs.map(s=>`
+    ${evs.map(e=>e._type==='tournament'?`
       <div class="sess-card" style="margin-bottom:8px">
-        ${sessDateBlock(s.date)}
+        <div style="background:var(--red);border-radius:var(--r2);padding:8px 10px;text-align:center;flex-shrink:0;min-width:52px">
+          <div style="font-size:18px">🏆</div>
+        </div>
         <div class="sess-body">
-          <div class="sess-title">${s.title}</div>
-          <div class="sess-meta">${ftRange(s.start_time,s.end_time)}${s.location?' · '+s.location:''}</div>
-          <div class="sess-actions" style="margin-top:6px">${divTags(s)}${typeTag(s.session_type)}</div>
+          <div class="sess-title">${e.name}</div>
+          <div class="sess-meta">${e.location||''}${e.format?' · '+e.format:''}</div>
+          <div class="sess-actions" style="margin-top:6px"><span class="tag tag-red">${e.status}</span>${e.format?`<span class="tag tag-navy">${e.format}</span>`:''}</div>
+        </div>
+        ${OM?.role==='admin'?`<button class="btn-sm" onclick="closeModal?.();showPanel('tournaments');activateNav('tournaments')">View</button>`:''}
+      </div>`:`
+      <div class="sess-card" style="margin-bottom:8px">
+        ${sessDateBlock(e.date)}
+        <div class="sess-body">
+          <div class="sess-title">${e.title}</div>
+          <div class="sess-meta">${ftRange(e.start_time,e.end_time)}${e.location?' · '+e.location:''}</div>
+          <div class="sess-actions" style="margin-top:6px">${divTags(e)}${typeTag(e.session_type)}</div>
         </div>
         <div style="display:flex;flex-direction:column;gap:4px">
-          <button class="btn-sm" onclick="openManageSession('${s.id}')">Manage</button>
-          <button class="btn-sm" onclick="openEditSession('${s.id}')">Edit</button>
+          <button class="btn-sm" onclick="openManageSession('${e.id}')">Manage</button>
+          <button class="btn-sm" onclick="openEditSession('${e.id}')">Edit</button>
         </div>
       </div>`).join('')}`;
 }
