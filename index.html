@@ -421,10 +421,17 @@
 
     <!-- ADMIN: ROSTER -->
     <div id="panel-admin-roster" class="panel">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem">
-        <div class="sl" style="margin-bottom:0">Member roster</div>
-        <button class="btn-sm" onclick="openInviteMember()">+ Invite member</button>
-      </div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;flex-wrap:wrap;gap:8px">
+  <div class="sl" style="margin-bottom:0">Member roster</div>
+  <div style="display:flex;gap:8px;align-items:center">
+    <label class="btn-sm" style="cursor:pointer">
+      📋 Import CSV
+      <input type="file" id="roster-import-file" accept=".csv" style="display:none" onchange="importRosterCSV(this)">
+    </label>
+    <button class="btn-sm" onclick="openInviteMember()">+ Invite member</button>
+  </div>
+</div>
+<div id="import-result" style="margin-bottom:1rem"></div>
       <div class="g3" style="margin-bottom:1rem">
         <div class="field"><label>Status</label>
           <select id="roster-filter-status" onchange="renderRoster()">
@@ -1839,6 +1846,65 @@ async function saveEditMember(memberId){
 }
 
 function openInviteMember(){
+  async function importRosterCSV(input){
+  const file=input.files[0];if(!file)return;
+  const resultEl=document.getElementById('import-result');
+  resultEl.innerHTML='<div class="notice">Reading file...</div>';
+  let emails=[];
+  try{
+    const text=await file.text();
+    const lines=text.split('\n').map(l=>l.trim()).filter(Boolean);
+    const header=lines[0].toLowerCase().split(',').map(h=>h.trim().replace(/"/g,''));
+    const emailCol=header.findIndex(h=>h.includes('email'));
+    if(emailCol>=0){
+      emails=lines.slice(1).map(l=>{
+        const cols=l.split(',').map(c=>c.trim().replace(/"/g,''));
+        return cols[emailCol];
+      });
+    } else {
+      emails=lines.map(l=>l.split(',')[0].trim().replace(/"/g,''));
+    }
+    emails=[...new Set(emails.map(e=>e.toLowerCase().trim()).filter(e=>e&&e.includes('@')))];
+    if(!emails.length){resultEl.innerHTML='<div class="notice">No valid emails found in file.</div>';input.value='';return;}
+  } catch(e){
+    resultEl.innerHTML='<div class="notice">Could not read file: '+e.message+'</div>';
+    input.value='';return;
+  }
+
+  resultEl.innerHTML=`<div class="notice">Found ${emails.length} email${emails.length!==1?'s':''}. Processing...</div>`;
+
+  let added=0,alreadyExists=0,notFound=[];
+
+  for(const email of emails){
+    // Check if already a member
+    const existing=allMembers.find(m=>m.profiles?.email===email);
+    if(existing){alreadyExists++;continue;}
+    // Look up profile
+    const {data:profile}=await sb.from('profiles').select('id,email').eq('email',email).single();
+    if(!profile){notFound.push(email);continue;}
+    // Add as pending member
+    const {error}=await sb.from('org_members').insert({
+      org_id:ORG.id,
+      user_id:profile.id,
+      role:'member',
+      status:'pending',
+    });
+    if(!error||error.code==='23505')added++;
+  }
+
+  // Reload roster
+  const {data:members}=await sb.from('org_members').select('*,profiles(id,full_name,email)').eq('org_id',ORG.id).order('joined_at',{ascending:false});
+  allMembers=members||[];
+  renderRoster();
+  input.value='';
+
+  let msg='<div class="notice" style="line-height:1.8">';
+  if(added)msg+=`✅ ${added} member${added!==1?'s':''} added as pending.<br>`;
+  if(alreadyExists)msg+=`ℹ️ ${alreadyExists} already on the roster.<br>`;
+  if(notFound.length)msg+=`⚠️ ${notFound.length} email${notFound.length!==1?'s':''} have no RallyHQ account yet: <span style="font-family:monospace;font-size:11px">${notFound.slice(0,5).join(', ')}${notFound.length>5?'…':''}</span>`;
+  msg+='</div>';
+  resultEl.innerHTML=msg;
+}
   openModal('Invite member',`
     <div class="notice">Send this link to prospective TRAP members. They can sign up directly and their application will appear in your roster as "pending".</div>
     <div style="background:var(--warm);border-radius:var(--r2);padding:10px 14px;font-family:monospace;font-size:12px;color:var(--tx2);margin-bottom:12px;word-break:break-all">${window.location.href}</div>
