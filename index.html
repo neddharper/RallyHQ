@@ -1135,11 +1135,27 @@ function renderCal(){
   const daysInMonth=new Date(calYear,calMonth+1,0).getDate();
   const daysInPrev=new Date(calYear,calMonth,0).getDate();
   const todayStr=new Date().toISOString().split('T')[0];
-  // Build event lookup by date
+  // Build event lookup by date — sessions + tournaments
   const evByDate={};
   allSessions.forEach(s=>{
     if(!evByDate[s.date])evByDate[s.date]=[];
-    evByDate[s.date].push(s);
+    evByDate[s.date].push({...s,_type:'session'});
+  });
+  (allTournaments||[]).forEach(t=>{
+    if(!evByDate[t.date])evByDate[t.date]=[];
+    evByDate[t.date].push({...t,_type:'tournament'});
+    // Multi-day tournaments — fill in intermediate dates
+    if(t.end_date&&t.end_date!==t.date){
+      const cur=new Date(t.date+'T00:00:00');
+      const end=new Date(t.end_date+'T00:00:00');
+      cur.setDate(cur.getDate()+1);
+      while(cur<=end){
+        const ds=cur.toISOString().split('T')[0];
+        if(!evByDate[ds])evByDate[ds]=[];
+        evByDate[ds].push({...t,_type:'tournament'});
+        cur.setDate(cur.getDate()+1);
+      }
+    }
   });
   const days=['SUN','MON','TUE','WED','THU','FRI','SAT'];
   let html=days.map(d=>`<div class="cal-dow">${d}</div>`).join('');
