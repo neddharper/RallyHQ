@@ -235,6 +235,9 @@
           <div class="field" style="margin-bottom:10px"><label>Email</label><input type="email" id="li-email" placeholder="you@example.com"></div>
           <div class="field" style="margin-bottom:16px"><label>Password</label><input type="password" id="li-pass" placeholder="••••••••"></div>
           <button class="btn-r bfull" onclick="doLogin()">Sign in</button>
+          <div style="text-align:center;margin-top:12px">
+            <button onclick="showForgotPassword()" style="background:none;border:none;color:var(--teal);font-size:12px;cursor:pointer;font-family:inherit;text-decoration:underline">Forgot password?</button>
+          </div>
         </div>
 
         <div id="tab-signup" style="display:none">
@@ -740,8 +743,8 @@ async function setupApp(){
   const savedPanel=localStorage.getItem('rq_panel');
   const defaultPanel=role==='admin'?'admin-schedule':role==='coach'?'coach-sessions':'home';
   // Validate saved panel is available for this role
-  const adminPanels=['admin-schedule','admin-roster','plans','tournaments','admin-announce','admin-stats','coach-sessions'];
-  const coachPanels=['coach-sessions','plans','tournaments','sessions','openplay'];
+  const adminPanels=['admin-schedule','admin-roster','plans','tournaments','admin-announce','admin-stats','coach-sessions','profile'];
+  const coachPanels=['coach-sessions','plans','tournaments','sessions','openplay','profile'];
   const memberPanels=['home','sessions','openplay','tournaments','perks','profile'];
   const validPanels=role==='admin'?(isCoach?adminPanels:adminPanels.filter(p=>p!=='coach-sessions')):role==='coach'?coachPanels:memberPanels;
   const panelToShow=savedPanel&&validPanels.includes(savedPanel)?savedPanel:defaultPanel;
@@ -780,12 +783,14 @@ function buildNav(){
     h+=nb('admin-announce',`Announce${annBadge}`);
     h+=nb('admin-stats','Stats');
     if(isCoach)h+=nb('coach-sessions','My Sessions');
+    h+=nb('profile','My Profile');
   } else if(role==='coach'){
     h+=nb('coach-sessions','My Sessions');
     h+=nb('plans','Plans');
     h+=nb('tournaments','Tournaments');
     h+=nb('sessions','All Sessions');
     h+=nb('openplay','Open Play');
+    h+=nb('profile','My Profile');
   } else {
     h+=nb('home',`Home${annBadge}`);
     h+=nb('sessions','Sessions');
@@ -2616,12 +2621,125 @@ function closeModal(){
 async function renderMemberProfile(){
   const el=document.getElementById('profile-content');
   el.innerHTML='<div class="loading">Loading...</div>';
+  const role=OM?.role||'member';
+  const isCoach=OM?.is_coach||role==='coach';
+  const statusColor={active:'tag-green',pending:'tag-amber',inactive:'tag-inactive'};
 
-  // Load all member data in parallel
-  const [{data:bookings},{data:waitlistRows},{data:notesRows}]=await Promise.all([
+  // Role badge label
+  const roleBadge=role==='admin'
+    ?`<span class="tag tag-red">Admin</span>${isCoach?'<span class="tag tag-teal-solid" style="margin-left:4px">Coach</span>':''}`
+    :role==='coach'
+    ?`<span class="tag tag-teal-solid">Coach</span>`
+    :`<span class="tag tag-navy">Member</span>`;
+
+  // Profile header — same for all roles
+  const profileHeader=`
+    <div style="background:var(--navy);border-radius:var(--r3);padding:1.5rem;margin-bottom:1.25rem;display:flex;align-items:flex-start;gap:16px">
+      <div style="width:60px;height:60px;border-radius:50%;background:var(--red);display:flex;align-items:center;justify-content:center;font-family:'Barlow Condensed',sans-serif;font-size:26px;font-weight:800;color:var(--white);flex-shrink:0">
+        ${(CP?.full_name||'?')[0].toUpperCase()}
+      </div>
+      <div style="flex:1">
+        <div style="font-family:'Barlow Condensed',sans-serif;font-size:26px;font-weight:800;color:var(--white);margin-bottom:4px">${CP?.full_name||'User'}</div>
+        <div style="font-size:13px;color:var(--teal);margin-bottom:8px">${CP?.email||''}</div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+          ${roleBadge}
+          <span class="tag ${statusColor[OM?.status]||'tag-warm'}">${OM?.status||'pending'}</span>
+          ${OM?.division?`<span class="tag tag-division">${OM.division}</span>`:''}
+          ${OM?.dupr_rating?`<span class="tag" style="background:rgba(255,255,255,0.15);color:var(--white);border:0.5px solid rgba(255,255,255,0.3)">DUPR ${OM.dupr_rating}</span>`:''}
+          ${OM?.dupr_range?`<span class="tag" style="background:rgba(255,255,255,0.1);color:rgba(255,255,255,0.7)">${OM.dupr_range}</span>`:''}
+        </div>
+      </div>
+      <button class="btn-sm" style="background:rgba(255,255,255,0.1);border-color:rgba(255,255,255,0.3);color:var(--white);flex-shrink:0" onclick="openEditProfile()">Edit profile</button>
+    </div>`;
+
+  // Password change section — same for all roles
+  const passwordSection=`
+    <div class="divider"></div>
+    <div class="sl">Change password</div>
+    <div class="card">
+      <div class="field" style="margin-bottom:10px">
+        <label>New password</label>
+        <input type="password" id="pw-new" placeholder="Min. 6 characters">
+      </div>
+      <div class="field" style="margin-bottom:12px">
+        <label>Confirm new password</label>
+        <input type="password" id="pw-confirm" placeholder="Repeat new password">
+      </div>
+      <div id="pw-msg" style="font-size:13px;margin-bottom:10px;display:none"></div>
+      <button class="btn-n" onclick="changePassword()">Update password</button>
+    </div>`;
+
+  // ── ADMIN PROFILE ─────────────────────────────────────────────────────────
+  if(role==='admin'){
+    const active=allMembers.filter(m=>m.status==='active').length;
+    const pending=allMembers.filter(m=>m.status==='pending').length;
+    const upcoming=allSessions.filter(s=>!isPast(s.date)).length;
+    const {data:coachSessions}=await sb.from('session_coaches').select('session_id').eq('coach_id',CU.id);
+    const coachSessionCount=coachSessions?.length||0;
+
+    el.innerHTML=profileHeader+`
+      <div class="stat-grid">
+        <div class="stat"><div class="stat-val">${active}</div><div class="stat-label">Active members</div></div>
+        <div class="stat"><div class="stat-val">${pending}</div><div class="stat-label">Pending approval</div></div>
+        <div class="stat"><div class="stat-val">${upcoming}</div><div class="stat-label">Upcoming sessions</div></div>
+        <div class="stat"><div class="stat-val">${allPlans.length}</div><div class="stat-label">Saved plans</div></div>
+        ${isCoach?`<div class="stat"><div class="stat-val">${coachSessionCount}</div><div class="stat-label">Sessions coached</div></div>`:''}
+      </div>
+      ${passwordSection}`;
+    return;
+  }
+
+  // ── COACH PROFILE ──────────────────────────────────────────────────────────
+  if(role==='coach'){
+    const {data:assignments}=await sb.from('session_coaches').select('session_id').eq('coach_id',CU.id);
+    const assignedIds=new Set((assignments||[]).map(a=>a.session_id));
+    const mySessions=allSessions.filter(s=>assignedIds.has(s.id));
+    const pastSessions=mySessions.filter(s=>isPast(s.date));
+    const upcomingSessions=mySessions.filter(s=>!isPast(s.date));
+    const {data:notes}=await sb.from('session_notes').select('*').eq('coach_id',CU.id).order('created_at',{ascending:false}).limit(5);
+
+    el.innerHTML=profileHeader+`
+      <div class="stat-grid">
+        <div class="stat"><div class="stat-val">${mySessions.length}</div><div class="stat-label">Total sessions</div></div>
+        <div class="stat"><div class="stat-val">${pastSessions.length}</div><div class="stat-label">Sessions completed</div></div>
+        <div class="stat"><div class="stat-val">${upcomingSessions.length}</div><div class="stat-label">Upcoming sessions</div></div>
+        <div class="stat"><div class="stat-val">${allPlans.length}</div><div class="stat-label">Saved plans</div></div>
+      </div>
+
+      ${upcomingSessions.length?`
+      <div class="sl">Upcoming assigned sessions</div>
+      ${upcomingSessions.slice(0,3).map(s=>`
+        <div class="sess-card" style="margin-bottom:8px">
+          ${sessDateBlock(s.date)}
+          <div class="sess-body">
+            <div class="sess-title">${s.title}</div>
+            <div class="sess-meta">${ftRange(s.start_time,s.end_time)}${s.location?' · '+s.location:''}</div>
+            <div class="sess-actions" style="margin-top:6px">${divTags(s)}${typeTag(s.session_type)}</div>
+          </div>
+          ${s.plan_id?`<button class="btn-r" style="font-size:11px;padding:6px 10px;flex-shrink:0" onclick="openCoachSessionView('${s.id}')">View plan</button>`:''}
+        </div>`).join('')}`:''}
+
+      ${notes?.length?`
+      <div class="sl" style="margin-top:1.25rem">Recent session notes</div>
+      ${notes.map(n=>{
+        const s=allSessions.find(x=>x.id===n.session_id);
+        return`<div class="card" style="margin-bottom:8px">
+          <div style="font-family:'Barlow Condensed',sans-serif;font-size:15px;font-weight:700;color:var(--navy);margin-bottom:4px">${s?s.title:'Session'}</div>
+          ${s?`<div style="font-size:12px;color:var(--tx2);margin-bottom:6px">${fd(s.date)}</div>`:''}
+          ${n.focuses?.length?`<div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:6px">${n.focuses.map(f=>`<span class="tag tag-teal">${f}</span>`).join('')}</div>`:''}
+          ${n.notes?`<div style="font-size:13px;color:var(--tx2);line-height:1.6;font-style:italic">"${n.notes.slice(0,100)}${n.notes.length>100?'…':''}"</div>`:''}
+        </div>`;
+      }).join('')}`:''}
+
+      ${passwordSection}`;
+    return;
+  }
+
+  // ── MEMBER PROFILE ─────────────────────────────────────────────────────────
+  const [{data:bookings},{data:notesRows},{data:entries}]=await Promise.all([
     sb.from('session_bookings').select('session_id').eq('user_id',CU.id),
-    sb.from('session_waitlist').select('session_id,position').eq('user_id',CU.id),
-    sb.from('session_notes').select('*').in('session_id',allSessions.map(s=>s.id)),
+    sb.from('session_notes').select('*').in('session_id',allSessions.length?allSessions.map(s=>s.id):['00000000-0000-0000-0000-000000000000']),
+    sb.from('tournament_entries').select('*,tournaments(name,date,location,status)').eq('user_id',CU.id).order('entered_at',{ascending:false}),
   ]);
 
   const bookedIds=new Set((bookings||[]).map(b=>b.session_id));
@@ -2632,39 +2750,14 @@ async function renderMemberProfile(){
   const notesMap={};(notesRows||[]).forEach(n=>{notesMap[n.session_id]=n;});
   const recaps=pastAttended.filter(s=>notesMap[s.id]).slice(0,5);
 
-  // Tournament entries
-  const {data:entries}=await sb.from('tournament_entries').select('*,tournaments(name,date,location,status)').eq('user_id',CU.id).order('entered_at',{ascending:false});
-
-  const statusColor={active:'tag-green',pending:'tag-amber',inactive:'tag-inactive'};
-
-  el.innerHTML=`
-    <!-- Profile header -->
-    <div style="background:var(--navy);border-radius:var(--r3);padding:1.5rem;margin-bottom:1.25rem;display:flex;align-items:flex-start;gap:16px">
-      <div style="width:60px;height:60px;border-radius:50%;background:var(--red);display:flex;align-items:center;justify-content:center;font-family:'Barlow Condensed',sans-serif;font-size:26px;font-weight:800;color:var(--white);flex-shrink:0">
-        ${(CP?.full_name||'?')[0].toUpperCase()}
-      </div>
-      <div style="flex:1">
-        <div style="font-family:'Barlow Condensed',sans-serif;font-size:26px;font-weight:800;color:var(--white);margin-bottom:4px">${CP?.full_name||'Member'}</div>
-        <div style="font-size:13px;color:var(--teal);margin-bottom:8px">${CP?.email||''}</div>
-        <div style="display:flex;gap:6px;flex-wrap:wrap">
-          <span class="tag ${statusColor[OM?.status]||'tag-warm'}">${OM?.status||'pending'}</span>
-          ${OM?.division?`<span class="tag tag-division">${OM.division}</span>`:''}
-          ${OM?.dupr_rating?`<span class="tag" style="background:rgba(255,255,255,0.15);color:var(--white);border:0.5px solid rgba(255,255,255,0.3)">DUPR ${OM.dupr_rating}</span>`:''}
-          ${OM?.dupr_range?`<span class="tag" style="background:rgba(255,255,255,0.1);color:rgba(255,255,255,0.7);">${OM.dupr_range}</span>`:''}
-        </div>
-      </div>
-      <button class="btn-sm" style="background:rgba(255,255,255,0.1);border-color:rgba(255,255,255,0.3);color:var(--white);flex-shrink:0" onclick="openEditProfile()">Edit profile</button>
-    </div>
-
-    <!-- Stats row -->
-    <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:10px;margin-bottom:1.25rem">
+  el.innerHTML=profileHeader+`
+    <div class="stat-grid">
       <div class="stat"><div class="stat-val">${trainingCount}</div><div class="stat-label">Training sessions</div></div>
       <div class="stat"><div class="stat-val">${openPlayCount}</div><div class="stat-label">Open plays</div></div>
       <div class="stat"><div class="stat-val">${entries?.length||0}</div><div class="stat-label">Tournaments entered</div></div>
       <div class="stat"><div class="stat-val">${upcomingBooked.length}</div><div class="stat-label">Upcoming booked</div></div>
     </div>
 
-    <!-- Upcoming sessions -->
     ${upcomingBooked.length?`
     <div class="sl">Upcoming sessions</div>
     ${upcomingBooked.map(s=>`
@@ -2678,7 +2771,6 @@ async function renderMemberProfile(){
         <button class="btn-danger" onclick="cancelBooking('${s.id}')">Cancel</button>
       </div>`).join('')}`:''}
 
-    <!-- Session recaps -->
     <div class="sl" style="margin-top:${upcomingBooked.length?'1.25rem':'0'}">Session history & recaps</div>
     ${recaps.length?recaps.map(s=>{
       const n=notesMap[s.id];
@@ -2695,7 +2787,6 @@ async function renderMemberProfile(){
       </div>`;
     }).join(''):`<div class="empty">No session history yet.</div>`}
 
-    <!-- Tournament entries -->
     ${entries?.length?`
     <div class="sl" style="margin-top:1.25rem">Tournament entries</div>
     ${entries.map(e=>`
@@ -2711,7 +2802,8 @@ async function renderMemberProfile(){
           ${e.result?`<div style="font-size:12px;color:var(--tx2);margin-top:4px">${e.result}</div>`:''}
         </div>
       </div>`).join('')}`:''}
-  `;
+
+    ${passwordSection}`;
 }
 
 // ── TOURNAMENTS ───────────────────────────────────────────────────────────────
@@ -3156,6 +3248,58 @@ async function withdrawTournament(tournamentId){
   if(!confirm('Withdraw from this tournament?'))return;
   await sb.from('tournament_entries').delete().eq('tournament_id',tournamentId).eq('user_id',CU.id);
   renderTournaments();
+}
+
+// ── PASSWORD CHANGE ───────────────────────────────────────────────────────────
+function showForgotPassword(){
+  document.getElementById('auth-err').style.display='none';
+  document.getElementById('auth-ok').style.display='none';
+  document.getElementById('tab-login').innerHTML=`
+    <div style="text-align:center;padding:1rem 0">
+      <div style="font-family:'Barlow Condensed',sans-serif;font-size:18px;font-weight:700;color:var(--navy);margin-bottom:8px">Reset your password</div>
+      <div style="font-size:13px;color:var(--tx2);margin-bottom:16px;line-height:1.6">
+        Email-based password reset is coming soon.<br>
+        For now, please contact your TRAP administrator to have your password reset manually.
+      </div>
+      <div style="background:rgba(75,133,141,0.1);border:0.5px solid rgba(75,133,141,0.3);border-radius:var(--r2);padding:10px 14px;font-size:12px;color:var(--deep);margin-bottom:16px">
+        Once you're logged in, you can change your password anytime from your profile page.
+      </div>
+      <button class="btn-o bfull" onclick="restoreLoginForm()">← Back to sign in</button>
+    </div>`;
+}
+
+function restoreLoginForm(){
+  document.getElementById('tab-login').innerHTML=`
+    <div class="field" style="margin-bottom:10px"><label>Email</label><input type="email" id="li-email" placeholder="you@example.com"></div>
+    <div class="field" style="margin-bottom:16px"><label>Password</label><input type="password" id="li-pass" placeholder="••••••••"></div>
+    <button class="btn-r bfull" onclick="doLogin()">Sign in</button>
+    <div style="text-align:center;margin-top:12px">
+      <button onclick="showForgotPassword()" style="background:none;border:none;color:var(--teal);font-size:12px;cursor:pointer;font-family:inherit;text-decoration:underline">Forgot password?</button>
+    </div>`;
+}
+
+async function changePassword(){
+  const pw=document.getElementById('pw-new').value;
+  const confirm=document.getElementById('pw-confirm').value;
+  const msg=document.getElementById('pw-msg');
+  msg.style.display='none';
+  if(!pw||pw.length<6){
+    msg.textContent='Password must be at least 6 characters.';
+    msg.style.color='var(--red)';msg.style.display='block';return;
+  }
+  if(pw!==confirm){
+    msg.textContent='Passwords do not match.';
+    msg.style.color='var(--red)';msg.style.display='block';return;
+  }
+  const {error}=await sb.auth.updateUser({password:pw});
+  if(error){
+    msg.textContent='Error: '+error.message;
+    msg.style.color='var(--red)';msg.style.display='block';return;
+  }
+  document.getElementById('pw-new').value='';
+  document.getElementById('pw-confirm').value='';
+  msg.textContent='✓ Password updated successfully.';
+  msg.style.color='var(--teal)';msg.style.display='block';
 }
 
 // ── MEMBER PROFILE EDIT ───────────────────────────────────────────────────────
