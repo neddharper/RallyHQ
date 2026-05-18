@@ -278,8 +278,8 @@
         <div class="hd-powered">powered by RallyHQ</div>
       </div>
       <div class="hd-right">
-        <span class="hd-badge hd-badge-teal" id="hd-dupr"></span>
-        <span class="hd-badge" id="hd-division"></span>
+        <span class="hd-badge hd-badge-teal" id="hd-name"></span>
+        <span class="hd-badge" id="hd-role"></span>
         <button class="so-btn" onclick="doSignout()">Sign out</button>
       </div>
     </div>
@@ -731,11 +731,12 @@ async function setupApp(){
   const isCoach=OM?.is_coach||role==='coach';
   const division=OM?.division||'';
   const dupr=OM?.dupr_rating;
-  // Header badges
-  document.getElementById('hd-division').textContent=division||'Member';
-  document.getElementById('hd-dupr').textContent=dupr?'DUPR '+dupr:'—';
-  if(!division)document.getElementById('hd-division').style.display='none';
-  if(!dupr)document.getElementById('hd-dupr').style.display='none';
+  // Header badges — name and role
+  const roleLabel=role==='admin'?'Admin':role==='coach'?'Coach':'Member';
+  const nameEl=document.getElementById('hd-name');
+  const roleEl=document.getElementById('hd-role');
+  if(nameEl)nameEl.textContent=CP?.full_name||'User';
+  if(roleEl)roleEl.textContent=roleLabel;
   // Load data
   await loadOrgData();
   buildNav();
@@ -3358,13 +3359,9 @@ async function saveEditProfile(){
   OM.division=document.getElementById('ep-division').value||null;
   OM.dupr_rating=document.getElementById('ep-dupr').value?parseFloat(document.getElementById('ep-dupr').value):null;
   OM.dupr_range=document.getElementById('ep-dupr-range').value||null;
-  // Refresh header badges
-  document.getElementById('hd-division').textContent=OM.division||'Member';
-  document.getElementById('hd-dupr').textContent=OM.dupr_rating?'DUPR '+OM.dupr_rating:'—';
-  if(!OM.division)document.getElementById('hd-division').style.display='none';
-  else document.getElementById('hd-division').style.display='';
-  if(!OM.dupr_rating)document.getElementById('hd-dupr').style.display='none';
-  else document.getElementById('hd-dupr').style.display='';
+  // Refresh header name chip
+  const nameEl=document.getElementById('hd-name');
+  if(nameEl)nameEl.textContent=name;
   closeModal();
   renderMemberProfile();
   alert('Profile updated!');
