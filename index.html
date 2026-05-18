@@ -172,7 +172,15 @@
     .chip { padding:6px 14px; border-radius:999px; border:0.5px solid var(--bm); background:transparent; font-size:13px; cursor:pointer; color:var(--tx2); font-family:inherit; }
     .chip.sel { background:var(--navy); color:var(--white); border-color:var(--navy); font-weight:600; }
 
-    /* ── MEMBER STATUS BANNER ── */
+    /* ── MEMBER SEARCH ── */
+    .member-search-wrap { position:relative; }
+    .member-search-input { width:100%; }
+    .member-search-results { position:absolute; top:100%; left:0; right:0; background:var(--white); border:0.5px solid var(--bm); border-top:none; border-radius:0 0 var(--r2) var(--r2); max-height:200px; overflow-y:auto; z-index:50; display:none; }
+    .member-search-result { padding:8px 12px; cursor:pointer; font-size:13px; border-bottom:0.5px solid var(--bl); }
+    .member-search-result:last-child { border-bottom:none; }
+    .member-search-result:hover { background:var(--warm); }
+    .member-search-result .msr-name { font-weight:600; color:var(--navy); }
+    .member-search-result .msr-email { font-size:11px; color:var(--tx3); margin-top:1px; }
     .status-banner { border-radius:var(--r2); padding:8px 14px; margin-bottom:1.25rem; font-size:12px; font-weight:600; display:flex; align-items:center; gap:8px; }
     .sb-active { background:rgba(75,133,141,0.15); color:var(--deep); border:0.5px solid rgba(75,133,141,0.3); }
     .sb-pending { background:#fff3e0; color:#7a4000; border:0.5px solid #f0c070; }
@@ -707,6 +715,7 @@ async function doSignout(){await sb.auth.signOut();}
 // ── APP SETUP ─────────────────────────────────────────────────────────────────
 async function setupApp(){
   const role=OM?.role||'member';
+  const isCoach=OM?.is_coach||role==='coach';
   const division=OM?.division||'';
   const dupr=OM?.dupr_rating;
   // Header badges
@@ -717,11 +726,17 @@ async function setupApp(){
   // Load data
   await loadOrgData();
   buildNav();
-  // Default panel
-  if(role==='admin')showPanel('admin-schedule');
-  else if(role==='coach')showPanel('coach-sessions');
-  else showPanel('home');
-  activateNav(role==='admin'?'admin-schedule':role==='coach'?'coach-sessions':'home');
+  // Restore last panel or use default
+  const savedPanel=localStorage.getItem('rq_panel');
+  const defaultPanel=role==='admin'?'admin-schedule':role==='coach'?'coach-sessions':'home';
+  // Validate saved panel is available for this role
+  const adminPanels=['admin-schedule','admin-roster','plans','tournaments','admin-announce','admin-stats','coach-sessions'];
+  const coachPanels=['coach-sessions','plans','tournaments','sessions','openplay'];
+  const memberPanels=['home','sessions','openplay','tournaments','perks','profile'];
+  const validPanels=role==='admin'?(isCoach?adminPanels:adminPanels.filter(p=>p!=='coach-sessions')):role==='coach'?coachPanels:memberPanels;
+  const panelToShow=savedPanel&&validPanels.includes(savedPanel)?savedPanel:defaultPanel;
+  showPanel(panelToShow);
+  activateNav(panelToShow);
 }
 
 async function loadOrgData(){
@@ -779,7 +794,26 @@ function getUnreadCount(){
   return allAnnouncements.filter(a=>new Date(a.created_at)>new Date(lastRead)).length;
 }
 
-async function markAnnouncementsRead(){
+async function openAllAnnouncements(){
+  markAnnouncementsRead();
+  const sorted=[...allAnnouncements].sort((a,b)=>{
+    if(a.pinned&&!b.pinned)return -1;
+    if(!a.pinned&&b.pinned)return 1;
+    return new Date(b.created_at)-new Date(a.created_at);
+  });
+  openModal('Announcements',
+    sorted.map(a=>`
+      <div style="margin-bottom:12px;padding-bottom:12px;border-bottom:0.5px solid var(--bl)">
+        ${a.pinned?'<div style="font-size:10px;font-weight:700;color:var(--red);letter-spacing:.06em;text-transform:uppercase;margin-bottom:4px">📌 Pinned</div>':''}
+        <div style="font-family:\'Barlow Condensed\',sans-serif;font-size:17px;font-weight:700;color:var(--navy);margin-bottom:4px">${a.title}</div>
+        <div style="font-size:13px;color:var(--tx2);line-height:1.6;margin-bottom:6px">${a.body}</div>
+        <div style="font-size:11px;color:var(--tx3)">${a.division?a.division+' · ':''} ${new Date(a.created_at).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})}</div>
+      </div>`).join('')+
+    '<button class="btn-o bfull" onclick="closeModal()">Close</button>'
+  );
+}
+
+function markAnnouncementsRead(){
   if(!OM)return;
   const now=new Date().toISOString();
   await sb.from('org_members').update({announcements_last_read:now}).eq('id',OM.id);
@@ -787,7 +821,10 @@ async function markAnnouncementsRead(){
   buildNav(); // refresh badge
 }
 function nb(p,l){return`<button class="nb" data-p="${p}" onclick="showPanel('${p}');activateNav('${p}')">${l}</button>`;}
-function activateNav(p){document.querySelectorAll('.nb').forEach(b=>b.classList.toggle('active',b.dataset.p===p));}
+function activateNav(p){
+  document.querySelectorAll('.nb').forEach(b=>b.classList.toggle('active',b.dataset.p===p));
+  localStorage.setItem('rq_panel',p);
+}
 
 function showPanel(name){
   document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
@@ -883,16 +920,25 @@ async function renderHome(){
   else if(status==='inactive') bannerEl.innerHTML=`<div class="status-banner sb-inactive">⚠️ Your membership is inactive. Please contact TRAP staff.</div>`;
   else bannerEl.innerHTML='';
 
-  // Announcements
+  // Announcements — pinned only on home, click to see all
   const annEl=document.getElementById('home-announcements');
-  if(allAnnouncements.length){
-    annEl.innerHTML=allAnnouncements.slice(0,3).map(a=>`
-      <div class="ann-card ${a.pinned?'ann-pinned':''}">
-        ${a.pinned?'<div style="font-size:10px;font-weight:700;color:var(--red);letter-spacing:.06em;text-transform:uppercase;margin-bottom:4px">📌 Pinned</div>':''}
+  const pinned=allAnnouncements.filter(a=>a.pinned);
+  const unread=getUnreadCount();
+  if(pinned.length){
+    annEl.innerHTML=pinned.map(a=>`
+      <div class="ann-card ann-pinned">
+        <div style="font-size:10px;font-weight:700;color:var(--red);letter-spacing:.06em;text-transform:uppercase;margin-bottom:4px">📌 Pinned announcement</div>
         <div class="ann-title">${a.title}</div>
         <div class="ann-body">${a.body}</div>
-        <div class="ann-meta">${a.division?a.division+' · ':''} ${new Date(a.created_at).toLocaleDateString('en-US',{month:'short',day:'numeric'})}</div>
-      </div>`).join('');
+        <div class="ann-meta" style="margin-top:6px">${a.division?a.division+' · ':''} ${new Date(a.created_at).toLocaleDateString('en-US',{month:'short',day:'numeric'})}</div>
+      </div>`).join('')+
+      `<div style="font-size:12px;color:var(--teal);font-weight:600;text-align:center;padding:4px 0;cursor:pointer" onclick="openAllAnnouncements()">
+        ${unread>0?`+${unread} unread — `:''}View all announcements →
+      </div>`;
+  } else if(unread>0){
+    annEl.innerHTML=`<div style="background:rgba(75,133,141,0.1);border:0.5px solid rgba(75,133,141,0.3);border-radius:var(--r2);padding:10px 14px;font-size:13px;font-weight:600;color:var(--deep);cursor:pointer" onclick="openAllAnnouncements()">📣 ${unread} new announcement${unread!==1?'s':''} — tap to view →</div>`;
+  } else {
+    annEl.innerHTML='';
   }
 
   // Upcoming sessions for this member
@@ -1567,11 +1613,8 @@ async function openManageSession(sessionId){
         <button class="btn-danger" onclick="removeCoach('${c.id}','${sessionId}')">Remove</button>
       </div>`).join(''):'<div style="font-size:13px;color:var(--tx3);padding:8px 0">No coaches assigned yet.</div>'}
     <div style="display:flex;gap:8px;margin-top:8px;margin-bottom:1rem">
-      <select id="add-coach-sel" style="flex:1">
-        <option value="">— assign a coach —</option>
-        ${coaches.filter(m=>!assignedIds.has(m.user_id)).map(m=>`<option value="${m.user_id}">${m.profiles?.full_name||''} (${m.role})</option>`).join('')}
-      </select>
-      <button class="btn-n" onclick="addCoach('${sessionId}')">Assign</button>
+      ${memberSearchWidget('ms-coach-search','ms-coach-results')}
+      <button class="btn-n" style="flex-shrink:0" onclick="addCoach('${sessionId}')">Assign</button>
     </div>
 
     <div class="divider"></div>
@@ -1606,11 +1649,8 @@ async function openManageSession(sessionId){
     <div class="divider"></div>
     <div class="sl">Add member manually</div>
     <div style="display:flex;gap:8px;margin-bottom:1rem">
-      <select id="add-booking-member" style="flex:1">
-        <option value="">— select member —</option>
-        ${allMembers.filter(m=>m.status==='active').map(m=>`<option value="${m.user_id}">${m.profiles?.full_name||''} (${m.profiles?.email||''})</option>`).join('')}
-      </select>
-      <button class="btn-n" onclick="addBookingManual('${sessionId}')">Add</button>
+      ${memberSearchWidget('ms-member-search','ms-member-results')}
+      <button class="btn-n" style="flex-shrink:0" onclick="addBookingManual('${sessionId}')">Add</button>
     </div>
     <div class="divider"></div>
     <div class="sl">Lesson plan</div>
@@ -1634,10 +1674,11 @@ function togglePlanInModal(elId,idx){
 }
 
 async function addBookingManual(sessionId){
-  const userId=document.getElementById('add-booking-member').value;
-  if(!userId){alert('Select a member.');return;}
+  const userId=getSelectedMember('ms-member-search');
+  if(!userId){alert('Search for and select a member first.');return;}
   const {error}=await sb.from('session_bookings').insert({session_id:sessionId,user_id:userId});
   if(error&&error.code!=='23505'){alert('Error: '+error.message);return;}
+  delete memberSearchSelected['ms-member-search'];
   closeModal();openManageSession(sessionId);
 }
 
@@ -1648,10 +1689,11 @@ async function removeBooking(bookingId,sessionId){
 }
 
 async function addCoach(sessionId){
-  const coachId=document.getElementById('add-coach-sel').value;
-  if(!coachId){alert('Select a coach to assign.');return;}
+  const coachId=getSelectedMember('ms-coach-search');
+  if(!coachId){alert('Search for and select a coach to assign.');return;}
   const {error}=await sb.from('session_coaches').insert({session_id:sessionId,coach_id:coachId});
   if(error&&error.code!=='23505'){alert('Error: '+error.message);return;}
+  delete memberSearchSelected['ms-coach-search'];
   closeModal();openManageSession(sessionId);
 }
 
@@ -2687,6 +2729,7 @@ async function renderTournaments(){
     const {count}=await sb.from('tournament_entries').select('*',{count:'exact',head:true}).eq('tournament_id',t.id);
     const myEntry=myEntryMap[t.id];
     const isCompleted=t.status==='completed';
+    const resultsHtml=isCompleted?await buildTournamentResults(t.id):'';
     return`<div class="card" style="margin-bottom:12px">
       <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:10px">
         <div style="flex:1">
@@ -2738,7 +2781,7 @@ async function renderTournaments(){
           ${myEntry?.placement?`<div style="font-family:'Barlow Condensed',sans-serif;font-size:22px;font-weight:800;color:var(--red);text-align:center">#${myEntry.placement}</div>`:''}
         </div>
       </div>
-      ${isCompleted?await buildTournamentResults(t.id):''}
+      ${resultsHtml}
     </div>`;
   }
 
@@ -2780,6 +2823,46 @@ async function buildTournamentResults(tournamentId){
         ${e.partner_name?`<span style="font-size:12px;color:var(--tx2)">w/ ${e.partner_name}</span>`:''}
       </div>`).join(''):''}
   </div>`;
+}
+
+// ── MEMBER SEARCH WIDGET ──────────────────────────────────────────────────────
+function memberSearchWidget(inputId, resultsId, onSelect){
+  // Build HTML for a search widget
+  return `<div class="member-search-wrap">
+    <input type="text" id="${inputId}" class="member-search-input" placeholder="Search by name or email..." autocomplete="off"
+      oninput="filterMemberSearch('${inputId}','${resultsId}')"
+      onfocus="filterMemberSearch('${inputId}','${resultsId}')"
+      onblur="setTimeout(()=>{const el=document.getElementById('${resultsId}');if(el)el.style.display='none';},200)">
+    <div class="member-search-results" id="${resultsId}"></div>
+  </div>`;
+}
+
+function filterMemberSearch(inputId, resultsId){
+  const q=(document.getElementById(inputId)?.value||'').toLowerCase().trim();
+  const el=document.getElementById(resultsId);
+  if(!el)return;
+  const active=allMembers.filter(m=>m.status==='active');
+  const filtered=q
+    ?active.filter(m=>(m.profiles?.full_name||'').toLowerCase().includes(q)||(m.profiles?.email||'').toLowerCase().includes(q))
+    :active.slice(0,8);
+  if(!filtered.length){el.style.display='none';return;}
+  el.innerHTML=filtered.map(m=>`
+    <div class="member-search-result" onmousedown="selectMemberResult('${inputId}','${resultsId}','${m.user_id}','${(m.profiles?.full_name||'').replace(/'/g,"\\'")}')">
+      <div class="msr-name">${m.profiles?.full_name||'Unknown'}</div>
+      <div class="msr-email">${m.profiles?.email||''}</div>
+    </div>`).join('');
+  el.style.display='block';
+}
+
+// Store selected user ID separately since input shows name not ID
+const memberSearchSelected={};
+function selectMemberResult(inputId, resultsId, userId, name){
+  document.getElementById(inputId).value=name;
+  document.getElementById(resultsId).style.display='none';
+  memberSearchSelected[inputId]=userId;
+}
+function getSelectedMember(inputId){
+  return memberSearchSelected[inputId]||null;
 }
 
 function toggleGenderField(wrapperId){
@@ -2993,11 +3076,8 @@ async function openManageTournament(id){
     <div class="divider"></div>
     <div class="sl">Add member manually</div>
     <div style="display:flex;gap:8px;margin-bottom:8px">
-      <select id="add-entry-member" style="flex:1">
-        <option value="">— select member —</option>
-        ${allMembers.filter(m=>m.status==='active').map(m=>`<option value="${m.user_id}">${m.profiles?.full_name||''}</option>`).join('')}
-      </select>
-      <button class="btn-n" onclick="addEntryManual('${id}')">Add</button>
+      ${memberSearchWidget('mt-member-search','mt-member-results')}
+      <button class="btn-n" style="flex-shrink:0" onclick="addEntryManual('${id}')">Add</button>
     </div>`);
 }
 
@@ -3016,10 +3096,11 @@ async function removeEntry(entryId,tournamentId){
 }
 
 async function addEntryManual(tournamentId){
-  const userId=document.getElementById('add-entry-member').value;
-  if(!userId){alert('Select a member.');return;}
+  const userId=getSelectedMember('mt-member-search');
+  if(!userId){alert('Search for and select a member first.');return;}
   const {error}=await sb.from('tournament_entries').insert({tournament_id:tournamentId,user_id:userId});
   if(error&&error.code!=='23505'){alert('Error: '+error.message);return;}
+  delete memberSearchSelected['mt-member-search'];
   closeModal();openManageTournament(tournamentId);
 }
 
