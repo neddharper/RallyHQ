@@ -172,7 +172,24 @@
     .chip { padding:6px 14px; border-radius:999px; border:0.5px solid var(--bm); background:transparent; font-size:13px; cursor:pointer; color:var(--tx2); font-family:inherit; }
     .chip.sel { background:var(--navy); color:var(--white); border-color:var(--navy); font-weight:600; }
 
-    /* ── MEMBER SEARCH ── */
+    /* ── TOAST ── */
+    .toast-wrap { position:fixed; bottom:1.5rem; left:50%; transform:translateX(-50%); z-index:999; display:flex; flex-direction:column; gap:8px; pointer-events:none; min-width:260px; max-width:420px; }
+    .toast { padding:12px 18px; border-radius:var(--r2); font-size:14px; font-weight:600; font-family:'Barlow Condensed',sans-serif; letter-spacing:.02em; color:var(--white); box-shadow:0 4px 16px rgba(0,0,0,0.25); animation:slideUp .25s ease; pointer-events:all; display:flex; align-items:center; gap:10px; }
+    .toast-success { background:var(--deep); border-left:4px solid var(--teal); }
+    .toast-error { background:#7a1515; border-left:4px solid var(--red); }
+    .toast-info { background:var(--navy); border-left:4px solid rgba(255,255,255,0.3); }
+    @keyframes slideUp { from { opacity:0; transform:translateY(12px); } to { opacity:1; transform:translateY(0); } }
+    @keyframes fadeOut { from { opacity:1; } to { opacity:0; } }
+
+    /* ── BUTTON LOADING ── */
+    .btn-loading { opacity:0.6; pointer-events:none; cursor:not-allowed; }
+
+    /* ── FULL SESSION CARD ── */
+    .sess-card-full { border-color:rgba(216,15,29,0.3); background:#fff8f8; }
+    .sess-card-no-coach { border-color:rgba(230,168,23,0.4); background:#fffbf0; }
+
+    /* ── COACH NOTES BADGE ── */
+    .notes-dot { display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--teal); margin-left:6px; vertical-align:middle; }
     .member-search-wrap { position:relative; }
     .member-search-input { width:100%; }
     .member-search-results { position:absolute; top:100%; left:0; right:0; background:var(--white); border:0.5px solid var(--bm); border-top:none; border-radius:0 0 var(--r2) var(--r2); max-height:200px; overflow-y:auto; z-index:50; display:none; }
@@ -611,6 +628,9 @@
   </div><!-- /wrap -->
 </div><!-- /main-app -->
 
+<!-- TOAST CONTAINER -->
+<div class="toast-wrap" id="toast-wrap"></div>
+
 <!-- MODAL -->
 <div id="modal" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeModal()">
   <div class="modal">
@@ -631,13 +651,54 @@ const sb=createClient(
 
 // ── STATE ─────────────────────────────────────────────────────────────────────
 let CU=null,CP=null,OM=null,ORG=null;
-let allSessions=[],allMembers=[],allAnnouncements=[],allPlans=[];
+let allSessions=[],allMembers=[],allAnnouncements=[],allPlans=[],allTournaments=[];
 const ORG_SLUG='trap';
 let schedView='list';
 let calYear=new Date().getFullYear(),calMonth=new Date().getMonth();
 let planSlots=[],planEditingId=null,currentPreviewPlan=null;
 
+// ── TOAST ─────────────────────────────────────────────────────────────────────
+function toast(msg,type='success',duration=3000){
+  const wrap=document.getElementById('toast-wrap');if(!wrap)return;
+  const icons={success:'✓',error:'✕',info:'ℹ'};
+  const el=document.createElement('div');
+  el.className=`toast toast-${type}`;
+  el.innerHTML=`<span style="font-size:16px">${icons[type]||'•'}</span><span>${msg}</span>`;
+  wrap.appendChild(el);
+  setTimeout(()=>{el.style.animation='fadeOut .3s ease forwards';setTimeout(()=>el.remove(),300);},duration);
+}
+
+// ── BUTTON LOADING ────────────────────────────────────────────────────────────
+function btnLoad(el,loading,text){
+  if(!el)return;
+  if(loading){el.classList.add('btn-loading');el._orig=el.textContent;el.textContent=text||'Saving...';}
+  else{el.classList.remove('btn-loading');if(el._orig)el.textContent=el._orig;}
+}
+
 // ── BOOT ──────────────────────────────────────────────────────────────────────
+// ── KEYBOARD SUPPORT ──────────────────────────────────────────────────────────
+document.addEventListener('keydown',e=>{
+  if(e.key==='Enter'){
+    // Login form
+    if(document.getElementById('tab-login')?.style.display!=='none'&&document.getElementById('auth-screen')?.style.display!=='none'){
+      doLogin();return;
+    }
+    // Modal — find first primary button and click it
+    const modal=document.getElementById('modal');
+    if(modal&&modal.style.display!=='none'){
+      // Don't submit on Enter inside textarea
+      if(e.target.tagName==='TEXTAREA')return;
+      const primaryBtn=modal.querySelector('.btn-r');
+      if(primaryBtn)primaryBtn.click();
+    }
+  }
+  // Escape closes modal
+  if(e.key==='Escape'){
+    const modal=document.getElementById('modal');
+    if(modal&&modal.style.display!=='none')closeModal();
+  }
+});
+
 async function boot(){
   document.getElementById('loading-screen').style.display='block';
   // Load org
@@ -1110,7 +1171,8 @@ async function renderOpenPlay(){
 
 // ── BOOKING + WAITLIST ────────────────────────────────────────────────────────
 async function bookSession(sessionId){
-  if(OM?.status!=='active'){alert('Your membership must be active to book sessions. Please contact TRAP staff.');return;}
+  if(OM?.status!=='active'){toast('Active membership required. Contact TRAP staff.','error');return;}
+  const btn=event?.target;btnLoad(btn,true,'Booking...');
   // Check current capacity
   const {count}=await sb.from('session_bookings').select('*',{count:'exact',head:true}).eq('session_id',sessionId);
   const s=allSessions.find(x=>x.id===sessionId);
@@ -1122,13 +1184,14 @@ async function bookSession(sessionId){
   }
   const {error}=await sb.from('session_bookings').insert({session_id:sessionId,user_id:CU.id});
   if(error){
-    if(error.code==='23505')alert('You are already booked for this session.');
-    else alert('Error: '+error.message);
+    if(error.code==='23505')toast('You are already booked for this session.','info');
+    else toast('Error: '+error.message,'error');
     return;
   }
   await loadOrgData();
   renderSessions();renderOpenPlay();renderHome();
-  alert('Booked! See you on the court. 🏓');
+  btnLoad(btn,false);
+  toast('Booked! See you on the court. 🏓');
 }
 
 async function joinWaitlist(sessionId){
@@ -1137,13 +1200,13 @@ async function joinWaitlist(sessionId){
   const position=(count||0)+1;
   const {error}=await sb.from('session_waitlist').insert({session_id:sessionId,user_id:CU.id,position});
   if(error){
-    if(error.code==='23505')alert('You are already on the waitlist for this session.');
-    else alert('Error: '+error.message);
+    if(error.code==='23505')toast('You are already on the waitlist.','info');
+    else toast('Error: '+error.message,'error');
     return;
   }
   await loadOrgData();
   renderSessions();renderOpenPlay();renderHome();
-  alert(`You're #${position} on the waitlist. We'll move you in automatically if a spot opens up.`);
+  toast(`You're #${position} on the waitlist — we'll move you in if a spot opens.`);
 }
 
 async function leaveWaitlist(sessionId){
@@ -1278,18 +1341,27 @@ async function renderAdminSessions(){
   const past=list.filter(s=>isPast(s.date)).reverse(); // most recent past first
 
   async function buildCard(s){
-    const {count}=await sb.from('session_bookings').select('*',{count:'exact',head:true}).eq('session_id',s.id);
+    const [{count},{data:coaches},{data:notes}]=await Promise.all([
+      sb.from('session_bookings').select('*',{count:'exact',head:true}).eq('session_id',s.id),
+      sb.from('session_coaches').select('coach_id').eq('session_id',s.id),
+      sb.from('session_notes').select('id').eq('session_id',s.id).limit(1),
+    ]);
     const booked=count||0;
     const p=isPast(s.date);
-    return`<div class="sess-card" style="${p?'opacity:0.65':''}">
+    const full=booked>=s.max_participants;
+    const noCoach=!p&&(!coaches||coaches.length===0);
+    const hasNotes=notes&&notes.length>0;
+    const cardClass=`sess-card${full&&!p?' sess-card-full':noCoach?' sess-card-no-coach':''}`;
+    return`<div class="${cardClass}" style="${p?'opacity:0.65':''}">
       ${sessDateBlock(s.date)}
       <div class="sess-body">
-        <div class="sess-title">${s.title}</div>
+        <div class="sess-title">${s.title}${hasNotes?`<span class="notes-dot" title="Session notes logged"></span>`:''}</div>
         <div class="sess-meta">${ftRange(s.start_time,s.end_time)}${s.location?' · '+s.location:''}</div>
         ${s.dupr_min||s.dupr_max?`<div style="font-size:12px;color:var(--teal);margin-top:2px;font-weight:600">DUPR ${s.dupr_min||''}${s.dupr_min&&s.dupr_max?'–':''}${s.dupr_max||''}</div>`:''}
         <div class="sess-actions" style="margin-top:6px">
           ${divTags(s)}${typeTag(s.session_type)}
-          <span class="tag ${booked>=s.max_participants?'tag-red':'tag-teal'}">${booked}/${s.max_participants}</span>
+          <span class="tag ${full?'tag-red':'tag-teal'}">${booked}/${s.max_participants}${full?' · Full':''}</span>
+          ${noCoach?`<span class="tag tag-amber" title="No coach assigned">⚠ No coach</span>`:''}
         </div>
       </div>
       <div style="display:flex;flex-direction:column;gap:6px;flex-shrink:0">
@@ -1406,8 +1478,8 @@ function getRecurringDates(){
   const count=parseInt(document.getElementById('rc-count').value)||8;
   const startDate=document.getElementById('rc-start-date').value;
   const selectedDows=[0,1,2,3,4,5,6].filter(i=>document.getElementById('rc-dow-'+i)?.checked);
-  if(!selectedDows.length){alert('Select at least one day of the week.');return null;}
-  if(!startDate){alert('Select a start date.');return null;}
+  if(!selectedDows.length){toast('Select at least one day of the week.','error');return null;}
+  if(!startDate){toast('Select a start date.','error');return null;}
 
   const dates=[];
   const start=new Date(startDate+'T00:00:00');
@@ -1474,10 +1546,10 @@ function previewRecurring(){
 async function generateRecurringSessions(){
   const dates=getRecurringDates();if(!dates)return;
   const title=document.getElementById('rc-title').value.trim();
-  if(!title){alert('Please enter a session title.');return;}
+  if(!title){toast('Please enter a session title.','error');return;}
   const startT=document.getElementById('rc-start').value;
   const endT=document.getElementById('rc-end').value;
-  if(!startT){alert('Please select a start time.');return;}
+  if(!startT){toast('Please select a start time.','error');return;}
 
   // Collect divisions
   const divs=[];
@@ -1514,7 +1586,7 @@ async function generateRecurringSessions(){
   for(let i=0;i<rows.length;i+=10){
     const batch=rows.slice(i,i+10);
     const {error}=await sb.from('org_sessions').insert(batch);
-    if(error){alert(`Error creating sessions: ${error.message}`);break;}
+    if(error){toast(`Error: ${error.message}`,'error');break;}
     created+=batch.length;
   }
 
@@ -1522,7 +1594,7 @@ async function generateRecurringSessions(){
   await loadOrgData();
   renderAdminSessions();
   if(schedView==='cal')renderCal();
-  alert(`✅ ${created} session${created!==1?'s':''} created successfully!`);
+  toast(`✅ ${created} session${created!==1?'s':''} created!`);
 }
 
 function openNewSession(){
@@ -1574,7 +1646,8 @@ async function saveNewSession(){
   const date=document.getElementById('ns-date').value;
   const startTime=document.getElementById('ns-time').value;
   const endTime=document.getElementById('ns-endtime').value;
-  if(!title||!date||!startTime){alert('Please fill in title, date, and start time.');return;}
+  if(!title||!date||!startTime){toast('Please fill in title, date and start time.','error');return;}
+  const btn=document.querySelector('#modal .btn-r');btnLoad(btn,true,'Creating...');
   // Collect selected divisions
   const divs=[];
   if(document.getElementById('ns-div-junior').checked)divs.push('Junior');
@@ -1599,9 +1672,10 @@ async function saveNewSession(){
     dupr_max:document.getElementById('ns-dupr-max').value?parseFloat(document.getElementById('ns-dupr-max').value):null,
     notes:document.getElementById('ns-notes').value,
   });
-  if(error){alert('Error: '+error.message);return;}
+  btnLoad(btn,false);
+  if(error){toast('Error: '+error.message,'error');return;}
   closeModal();await loadOrgData();renderAdminSessions();
-  alert('Session created!');
+  toast('Session created!');
 }
 
 async function openManageSession(sessionId){
@@ -1691,9 +1765,9 @@ function togglePlanInModal(elId,idx){
 
 async function addBookingManual(sessionId){
   const userId=getSelectedMember('ms-member-search');
-  if(!userId){alert('Search for and select a member first.');return;}
+  if(!userId){toast('Search for and select a member first.','error');return;}
   const {error}=await sb.from('session_bookings').insert({session_id:sessionId,user_id:userId});
-  if(error&&error.code!=='23505'){alert('Error: '+error.message);return;}
+  if(error&&error.code!=='23505'){toast('Error: '+error.message,'error');return;}
   delete memberSearchSelected['ms-member-search'];
   closeModal();openManageSession(sessionId);
 }
@@ -1706,9 +1780,9 @@ async function removeBooking(bookingId,sessionId){
 
 async function addCoach(sessionId){
   const coachId=getSelectedMember('ms-coach-search');
-  if(!coachId){alert('Search for and select a coach to assign.');return;}
+  if(!coachId){toast('Search for and select a coach.','error');return;}
   const {error}=await sb.from('session_coaches').insert({session_id:sessionId,coach_id:coachId});
-  if(error&&error.code!=='23505'){alert('Error: '+error.message);return;}
+  if(error&&error.code!=='23505'){toast('Error: '+error.message,'error');return;}
   delete memberSearchSelected['ms-coach-search'];
   closeModal();openManageSession(sessionId);
 }
@@ -1722,7 +1796,7 @@ async function removeCoach(assignmentId,sessionId){
 async function promoteFromWaitlist(waitlistId,sessionId,userId){
   if(!confirm('Move this person from the waitlist into the session?'))return;
   const {error}=await sb.from('session_bookings').insert({session_id:sessionId,user_id:userId});
-  if(error){alert('Error: '+error.message);return;}
+  if(error){toast('Error: '+error.message,'error');return;}
   await sb.from('session_waitlist').delete().eq('id',waitlistId);
   // Reorder remaining
   const {data:remaining}=await sb.from('session_waitlist').select('*').eq('session_id',sessionId).order('joined_at',{ascending:true});
@@ -1817,8 +1891,8 @@ async function saveEditSession(sessionId){
     dupr_max:document.getElementById('es-dupr-max').value?parseFloat(document.getElementById('es-dupr-max').value):null,
     notes:document.getElementById('es-notes').value,
   }).eq('id',sessionId);
-  if(error){alert('Error: '+error.message);return;}
-  closeModal();await loadOrgData();renderAdminSessions();alert('Session updated!');
+  if(error){toast('Error: '+error.message,'error');return;}
+  closeModal();await loadOrgData();renderAdminSessions();toast('Session updated!');
 }
 
 async function deleteSession(sessionId){
@@ -1871,7 +1945,7 @@ function renderRoster(){
 
 async function updateMemberStatus(memberId,status){
   const {error}=await sb.from('org_members').update({status}).eq('id',memberId);
-  if(error){alert('Error: '+error.message);return;}
+  if(error){toast('Error: '+error.message,'error');return;}
   const m=allMembers.find(x=>x.id===memberId);if(m)m.status=status;
   renderRoster();
 }
@@ -1941,7 +2015,7 @@ async function saveEditMember(memberId){
     role:document.getElementById('em-role').value,
     is_coach:document.getElementById('em-is-coach').checked,
   }).eq('id',memberId);
-  if(error){alert('Error: '+error.message);return;}
+  if(error){toast('Error: '+error.message,'error');return;}
   closeModal();
   const {data:members}=await sb.from('org_members').select('*,profiles(id,full_name,email)').eq('org_id',ORG.id).order('joined_at',{ascending:false});
   allMembers=members||[];renderRoster();
@@ -1951,7 +2025,7 @@ function openInviteMember(){
   openModal('Invite member',`
     <div class="notice">Send this link to prospective TRAP members. They can sign up directly and their application will appear in your roster as "pending".</div>
     <div style="background:var(--warm);border-radius:var(--r2);padding:10px 14px;font-family:monospace;font-size:12px;color:var(--tx2);margin-bottom:12px;word-break:break-all">${window.location.href}</div>
-    <button class="btn-n bfull" onclick="navigator.clipboard.writeText('${window.location.href}').then(()=>alert('Link copied!'))">Copy invite link</button>`);
+    <button class="btn-n bfull" onclick="navigator.clipboard.writeText('${window.location.href}').then(()=>toast('Link copied!'))">Copy invite link</button>`);
 }
 
 async function importRosterCSV(file){
@@ -2067,13 +2141,13 @@ function openNewAnnouncement(){
 async function saveAnnouncement(){
   const title=document.getElementById('na-title').value.trim();
   const body=document.getElementById('na-body').value.trim();
-  if(!title||!body){alert('Please fill in title and message.');return;}
+  if(!title||!body){toast('Please fill in title and message.','error');return;}
   const {error}=await sb.from('org_announcements').insert({
     org_id:ORG.id,author_id:CU.id,title,body,
     division:document.getElementById('na-div').value||null,
     pinned:document.getElementById('na-pin').checked,
   });
-  if(error){alert('Error: '+error.message);return;}
+  if(error){toast('Error: '+error.message,'error');return;}
   closeModal();await loadOrgData();renderAdminAnnouncements();
 }
 
@@ -2120,20 +2194,20 @@ function openEditAnnouncement(id){
 async function saveEditAnnouncement(id){
   const title=document.getElementById('ea-title').value.trim();
   const body=document.getElementById('ea-body').value.trim();
-  if(!title||!body){alert('Please fill in title and message.');return;}
+  if(!title||!body){toast('Please fill in title and message.','error');return;}
   const {error}=await sb.from('org_announcements').update({
     title,body,
     division:document.getElementById('ea-div').value||null,
     pinned:document.getElementById('ea-pin').checked,
   }).eq('id',id);
-  if(error){alert('Error: '+error.message);return;}
+  if(error){toast('Error: '+error.message,'error');return;}
   closeModal();
   await loadOrgData();renderAdminAnnouncements();
 }
 
 async function togglePin(id,pinned){
   const {error}=await sb.from('org_announcements').update({pinned}).eq('id',id);
-  if(error){alert('Error: '+error.message);return;}
+  if(error){toast('Error: '+error.message,'error');return;}
   const a=allAnnouncements.find(x=>x.id===id);if(a)a.pinned=pinned;
   renderAdminAnnouncements();
 }
@@ -2222,7 +2296,7 @@ async function renderCoachSessions(){
 
 async function openCoachSessionView(sessionId){
   const s=allSessions.find(x=>x.id===sessionId);if(!s)return;
-  if(!s.plan_id){alert('No plan attached to this session.');return;}
+  if(!s.plan_id){toast('No plan attached to this session.','info');return;}
   // Load plan, bookings, and member DUPR data together
   const [{data:planRows},{data:bookings},{data:memberData}]=await Promise.all([
     sb.from('lesson_plans').select('*').eq('id',s.plan_id),
@@ -2230,7 +2304,7 @@ async function openCoachSessionView(sessionId){
     sb.from('org_members').select('user_id,dupr_rating').eq('org_id',ORG.id),
   ]);
   const plan=planRows?.[0];
-  if(!plan){alert('Plan not found.');return;}
+  if(!plan){toast('Plan not found.','error');return;}
   // Build DUPR lookup map from org_members
   const duprMap={};(memberData||[]).forEach(m=>{duprMap[m.user_id]=m.dupr_rating;});
   const used=(plan.slots||[]).reduce((a,x)=>a+x.dur,0)+(plan.warmup?5:0)+(plan.cooldown?5:0);
@@ -2361,7 +2435,7 @@ function addCustomItem(){
   const title=document.getElementById('pl-custom-title').value.trim();
   const dur=parseInt(document.getElementById('pl-custom-dur').value)||10;
   const note=document.getElementById('pl-custom-note').value.trim();
-  if(!title){alert('Enter a title for the custom item.');return;}
+  if(!title){toast('Enter a title for the custom item.','error');return;}
   planSlots.push({type:'custom',title,dur,note});
   document.getElementById('pl-custom-title').value='';
   document.getElementById('pl-custom-note').value='';
@@ -2423,7 +2497,7 @@ function slotRow(n,title,meta,tip){
 }
 
 function previewPlan(){
-  if(!planSlots.length){alert('Add at least one item first.');return;}
+  if(!planSlots.length){toast('Add at least one item first.','error');return;}
   currentPreviewPlan={
     title:document.getElementById('pl-title').value||'Lesson Plan',
     goal:document.getElementById('pl-goal').value,
@@ -2445,7 +2519,7 @@ function previewPlan(){
 }
 
 async function savePlan(){
-  if(!planSlots.length){alert('Add at least one item first.');return;}
+  if(!planSlots.length){toast('Add at least one item first.','error');return;}
   const payload={
     coach_id:CU.id,
     title:document.getElementById('pl-title').value.trim()||'Untitled Plan',
@@ -2465,9 +2539,9 @@ async function savePlan(){
     const {data:plan,error:err}=await sb.from('lesson_plans').insert(payload).select().single();
     error=err;if(!error)allPlans.unshift(plan);
   }
-  if(error){alert('Error: '+error.message);return;}
+  if(error){toast('Error: '+error.message,'error');return;}
   hidePlanBuilder();renderPlansList();
-  alert(planEditingId?'Plan updated!':'Plan saved!');
+  toast(planEditingId?'Plan updated!':'Plan saved!');
   planEditingId=null;
 }
 
@@ -2533,9 +2607,9 @@ function updatePlanDropdowns(){
 
 async function attachPlanToSession(sessionId,planId){
   const {error}=await sb.from('org_sessions').update({plan_id:planId||null}).eq('id',sessionId);
-  if(error){alert('Error: '+error.message);return;}
+  if(error){toast('Error: '+error.message,'error');return;}
   const s=allSessions.find(x=>x.id===sessionId);if(s)s.plan_id=planId||null;
-  alert(planId?'Plan attached!':'Plan removed.');
+  toast(planId?'Plan attached!':'Plan removed.',planId?'success':'info');
 }
 
 function doPlanPrint(p){
@@ -2588,15 +2662,15 @@ async function saveSessionNotes(sessionId){
     session_id:sessionId,coach_id:CU.id,
     notes,coach_private_notes:privateNotes||null,focuses,
   });
-  if(error){alert('Error: '+error.message);return;}
-  closeModal();renderCoachSessions();alert('Session notes saved!');
+  if(error){toast('Error: '+error.message,'error');return;}
+  closeModal();renderCoachSessions();toast('Session notes saved!');
 }
 
 async function openViewNotes(sessionId){
   const s=allSessions.find(x=>x.id===sessionId);if(!s)return;
   const {data:notesRows}=await sb.from('session_notes').select('*').eq('session_id',sessionId).eq('coach_id',CU.id);
   const notes=notesRows?.[0];
-  if(!notes){alert('No notes found.');return;}
+  if(!notes){toast('No notes found.','info');return;}
   openModal('Session notes — '+s.title,`
     <div style="background:var(--warm);border-radius:var(--r2);padding:10px 14px;margin-bottom:1rem;font-size:13px;color:var(--tx2)">
       ${fd(s.date)} · ${ftRange(s.start_time,s.end_time)}
@@ -3037,7 +3111,7 @@ function openNewTournament(){
 async function saveNewTournament(){
   const name=document.getElementById('nt-name').value.trim();
   const date=document.getElementById('nt-date').value;
-  if(!name||!date){alert('Please enter a name and date.');return;}
+  if(!name||!date){toast('Please enter a name and date.','error');return;}
   const format=document.getElementById('nt-format').value;
   const gender=document.getElementById('nt-gender').value;
   const formatFull=format&&gender?`${gender} ${format}`:format||null;
@@ -3051,8 +3125,8 @@ async function saveNewTournament(){
     registration_url:document.getElementById('nt-reg-url').value||null,
     is_public:document.getElementById('nt-public').checked,
   });
-  if(error){alert('Error: '+error.message);return;}
-  closeModal();renderTournaments();alert('Tournament created!');
+  if(error){toast('Error: '+error.message,'error');return;}
+  closeModal();renderTournaments();toast('Tournament created!');
 }
 
 async function openEditTournament(id){
@@ -3140,8 +3214,8 @@ async function saveEditTournament(id){
     registration_url:document.getElementById('et-reg-url').value||null,
     is_public:document.getElementById('et-public').checked,
   }).eq('id',id);
-  if(error){alert('Error: '+error.message);return;}
-  closeModal();renderTournaments();alert('Tournament updated!');
+  if(error){toast('Error: '+error.message,'error');return;}
+  closeModal();renderTournaments();toast('Tournament updated!');
 }
 
 async function deleteTournament(id){
@@ -3188,7 +3262,7 @@ async function saveEntryResult(entryId,tournamentId){
   const placement=parseInt(document.getElementById('place-'+entryId).value)||null;
   const nationals_bid=document.getElementById('bid-'+entryId).checked;
   const {error}=await sb.from('tournament_entries').update({placement,nationals_bid}).eq('id',entryId);
-  if(error){alert('Error: '+error.message);return;}
+  if(error){toast('Error: '+error.message,'error');return;}
   closeModal();renderTournaments();
 }
 
@@ -3200,9 +3274,9 @@ async function removeEntry(entryId,tournamentId){
 
 async function addEntryManual(tournamentId){
   const userId=getSelectedMember('mt-member-search');
-  if(!userId){alert('Search for and select a member first.');return;}
+  if(!userId){toast('Search for and select a member first.','error');return;}
   const {error}=await sb.from('tournament_entries').insert({tournament_id:tournamentId,user_id:userId});
-  if(error&&error.code!=='23505'){alert('Error: '+error.message);return;}
+  if(error&&error.code!=='23505'){toast('Error: '+error.message,'error');return;}
   delete memberSearchSelected['mt-member-search'];
   closeModal();openManageTournament(tournamentId);
 }
@@ -3238,11 +3312,11 @@ async function submitEntry(tournamentId){
     partner_name:partner||null,
   });
   if(error){
-    if(error.code==='23505')alert('You are already entered in this tournament.');
-    else alert('Error: '+error.message);
+    if(error.code==='23505')toast('You are already entered in this tournament.','info');
+    else toast('Error: '+error.message,'error');
     return;
   }
-  closeModal();renderTournaments();alert('Entry confirmed! Good luck. 🏆');
+  closeModal();renderTournaments();toast('Entry confirmed! Good luck 🏆');
 }
 
 async function withdrawTournament(tournamentId){
@@ -3343,17 +3417,17 @@ function openEditProfile(){
 
 async function saveEditProfile(){
   const name=document.getElementById('ep-name').value.trim();
-  if(!name){alert('Name cannot be empty.');return;}
+  if(!name){toast('Name cannot be empty.','error');return;}
   // Update display name in profiles table
   const {error:profileErr}=await sb.from('profiles').update({full_name:name}).eq('id',CU.id);
-  if(profileErr){alert('Error: '+profileErr.message);return;}
+  if(profileErr){toast('Error: '+profileErr.message,'error');return;}
   // Update division/DUPR in org_members
   const {error:omErr}=await sb.from('org_members').update({
     division:document.getElementById('ep-division').value||null,
     dupr_rating:document.getElementById('ep-dupr').value?parseFloat(document.getElementById('ep-dupr').value):null,
     dupr_range:document.getElementById('ep-dupr-range').value||null,
   }).eq('id',OM.id);
-  if(omErr){alert('Error: '+omErr.message);return;}
+  if(omErr){toast('Error: '+omErr.message,'error');return;}
   // Update local state
   CP.full_name=name;
   OM.division=document.getElementById('ep-division').value||null;
@@ -3364,7 +3438,7 @@ async function saveEditProfile(){
   if(nameEl)nameEl.textContent=name;
   closeModal();
   renderMemberProfile();
-  alert('Profile updated!');
+  toast('Profile updated!');
 }
 
 // ── START ─────────────────────────────────────────────────────────────────────
