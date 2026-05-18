@@ -638,8 +638,12 @@ let planSlots=[],planEditingId=null,currentPreviewPlan=null;
 async function boot(){
   document.getElementById('loading-screen').style.display='block';
   // Load org
-  const {data:org}=await sb.from('organizations').select('*').eq('slug',ORG_SLUG).single();
-  ORG=org;
+  const {data:orgs}=await sb.from('organizations').select('*').eq('slug',ORG_SLUG);
+  ORG=orgs?.[0]||null;
+  if(!ORG){
+    document.getElementById('loading-screen').textContent='Organization not found. Please check configuration.';
+    return;
+  }
   const {data:{session}}=await sb.auth.getSession();
   if(session)await initUser(session.user);
   else showScr('auth');
@@ -655,11 +659,17 @@ function showScr(s){
 }
 async function initUser(user){
   CU=user;
-  const {data:profile}=await sb.from('profiles').select('*').eq('id',user.id).single();
-  CP=profile;
-  // Get org membership
+  const {data:profileRows}=await sb.from('profiles').select('*').eq('id',user.id);
+  CP=profileRows?.[0]||null;
   if(ORG){
-    const {data:om}=await sb.from('org_members').select('*').eq('org_id',ORG.id).eq('user_id',user.id).single();
+    const {data:omRows}=await sb.from('org_members').select('*').eq('org_id',ORG.id).eq('user_id',user.id);
+    let om=omRows?.[0]||null;
+    if(!om){
+      const {data:newOm}=await sb.from('org_members').insert({
+        org_id:ORG.id,user_id:user.id,role:'member',status:'pending',
+      }).select();
+      om=newOm?.[0]||null;
+    }
     OM=om;
   }
   showScr('app');
