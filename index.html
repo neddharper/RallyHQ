@@ -1716,7 +1716,7 @@ async function openManageSession(sessionId){
         <button class="btn-danger" onclick="removeCoach('${c.id}','${sessionId}')">Remove</button>
       </div>`).join(''):'<div style="font-size:13px;color:var(--tx3);padding:8px 0">No coaches assigned yet.</div>'}
     <div style="display:flex;gap:8px;margin-top:8px;margin-bottom:1rem">
-      ${memberSearchWidget('ms-coach-search','ms-coach-results')}
+      ${coachSearchWidget('ms-coach-search','ms-coach-results')}
       <button class="btn-n" style="flex-shrink:0" onclick="addCoach('${sessionId}')">Assign</button>
     </div>
 
@@ -3068,29 +3068,42 @@ async function buildTournamentResults(tournamentId){
 }
 
 // ── MEMBER SEARCH WIDGET ──────────────────────────────────────────────────────
-function memberSearchWidget(inputId, resultsId, onSelect){
-  // Build HTML for a search widget
+function memberSearchWidget(inputId, resultsId){
   return `<div class="member-search-wrap">
     <input type="text" id="${inputId}" class="member-search-input" placeholder="Search by name or email..." autocomplete="off"
-      oninput="filterMemberSearch('${inputId}','${resultsId}')"
-      onfocus="filterMemberSearch('${inputId}','${resultsId}')"
+      oninput="filterMemberSearch('${inputId}','${resultsId}',false)"
+      onfocus="filterMemberSearch('${inputId}','${resultsId}',false)"
       onblur="setTimeout(()=>{const el=document.getElementById('${resultsId}');if(el)el.style.display='none';},200)">
     <div class="member-search-results" id="${resultsId}"></div>
   </div>`;
 }
 
-function filterMemberSearch(inputId, resultsId){
+function coachSearchWidget(inputId, resultsId){
+  return `<div class="member-search-wrap">
+    <input type="text" id="${inputId}" class="member-search-input" placeholder="Search coaches by name or email..." autocomplete="off"
+      oninput="filterMemberSearch('${inputId}','${resultsId}',true)"
+      onfocus="filterMemberSearch('${inputId}','${resultsId}',true)"
+      onblur="setTimeout(()=>{const el=document.getElementById('${resultsId}');if(el)el.style.display='none';},200)">
+    <div class="member-search-results" id="${resultsId}"></div>
+  </div>`;
+}
+
+function filterMemberSearch(inputId, resultsId, coachOnly=false){
   const q=(document.getElementById(inputId)?.value||'').toLowerCase().trim();
   const el=document.getElementById(resultsId);
   if(!el)return;
-  const active=allMembers.filter(m=>m.status==='active');
+  let pool=allMembers.filter(m=>m.status==='active');
+  if(coachOnly) pool=pool.filter(m=>m.is_coach||m.role==='coach'||m.role==='admin');
   const filtered=q
-    ?active.filter(m=>(m.profiles?.full_name||'').toLowerCase().includes(q)||(m.profiles?.email||'').toLowerCase().includes(q))
-    :active.slice(0,8);
-  if(!filtered.length){el.style.display='none';return;}
+    ?pool.filter(m=>(m.profiles?.full_name||'').toLowerCase().includes(q)||(m.profiles?.email||'').toLowerCase().includes(q))
+    :pool.slice(0,8);
+  if(!filtered.length){
+    el.innerHTML=`<div style="padding:10px 12px;font-size:13px;color:var(--tx3)">${coachOnly?'No coaches found — assign coach role in Roster first.':'No members found.'}</div>`;
+    el.style.display='block';return;
+  }
   el.innerHTML=filtered.map(m=>`
     <div class="member-search-result" onmousedown="selectMemberResult('${inputId}','${resultsId}','${m.user_id}','${(m.profiles?.full_name||'').replace(/'/g,"\\'")}')">
-      <div class="msr-name">${m.profiles?.full_name||'Unknown'}</div>
+      <div class="msr-name">${m.profiles?.full_name||'Unknown'}${m.role==='admin'?' <span style="font-size:10px;color:var(--red);font-weight:700">ADMIN</span>':m.role==='coach'||m.is_coach?' <span style="font-size:10px;color:var(--teal);font-weight:700">COACH</span>':''}</div>
       <div class="msr-email">${m.profiles?.email||''}</div>
     </div>`).join('');
   el.style.display='block';
