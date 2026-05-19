@@ -464,6 +464,7 @@
             📋 Import CSV
             <input type="file" id="roster-import-file" accept=".csv" style="display:none">
           </label>
+          <button class="btn-sm" onclick="exportRosterCSV()">⬇ Export CSV</button>
           <button class="btn-sm" onclick="openInviteMember()">+ Invite member</button>
         </div>
       </div>
@@ -2060,6 +2061,36 @@ function openInviteMember(){
     <div class="notice">Send this link to prospective TRAP members. They can sign up directly and their application will appear in your roster as "pending".</div>
     <div style="background:var(--warm);border-radius:var(--r2);padding:10px 14px;font-family:monospace;font-size:12px;color:var(--tx2);margin-bottom:12px;word-break:break-all">${window.location.href}</div>
     <button class="btn-n bfull" onclick="navigator.clipboard.writeText('${window.location.href}').then(()=>toast('Link copied!'))">Copy invite link</button>`);
+}
+
+function exportRosterCSV(){
+  if(!allMembers.length){toast('No members to export.','info');return;}
+  const headers=['First Name','Last Name','Email','Division','DUPR Rating','DUPR Range','Role','Is Coach','Status','Joined'];
+  const rows=allMembers.map(m=>{
+    const full=m.profiles?.full_name||'';
+    const firstName=m.profiles?.first_name||full.split(' ')[0]||'';
+    const lastName=m.profiles?.last_name||full.split(' ').slice(1).join(' ')||'';
+    const joined=m.joined_at?new Date(m.joined_at).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}):'';
+    return [
+      firstName,
+      lastName,
+      m.profiles?.email||'',
+      m.division||'',
+      m.dupr_rating||'',
+      m.dupr_range||'',
+      m.role||'member',
+      m.is_coach?'Yes':'No',
+      m.status||'',
+      joined,
+    ].map(v=>`"${String(v).replace(/"/g,'""')}"`).join(',');
+  });
+  const csv=[headers.join(','),...rows].join('\r\n');
+  const blob=new Blob([csv],{type:'text/csv'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download=`TRAP-Roster-${new Date().toISOString().split('T')[0]}.csv`;
+  a.click();
+  toast(`Exported ${allMembers.length} members`);
 }
 
 async function importRosterCSV(file){
