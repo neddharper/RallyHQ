@@ -3318,14 +3318,20 @@ async function openManageTournament(id){
           <div style="font-size:12px;color:var(--tx2)">${e.profiles?.email||''}${e.partner_name?' · w/ '+e.partner_name:''}${e.division?' · '+e.division:''}</div>
           ${e.result?`<div style="font-size:12px;color:var(--tx2);margin-top:2px">Result: ${e.result}</div>`:''}
         </div>
-        <div style="display:flex;gap:6px;align-items:center;flex-shrink:0">
-          <input type="number" placeholder="#" min="1" value="${e.placement||''}" style="width:50px;padding:4px 6px;font-size:12px" id="place-${e.id}">
-          <label class="tog" style="transform:scale(0.8)" title="Nationals bid">
-            <input type="checkbox" ${e.nationals_bid?'checked':''} id="bid-${e.id}">
-            <span class="tsl"></span>
-          </label>
-          <button class="btn-sm" style="font-size:11px" onclick="saveEntryResult('${e.id}','${id}')">Save</button>
-          <button class="btn-danger" onclick="removeEntry('${e.id}','${id}')">×</button>
+        <div style="display:flex;gap:8px;align-items:center;flex-shrink:0">
+          <div style="display:flex;flex-direction:column;align-items:center;gap:2px">
+            <span style="font-size:10px;font-weight:600;color:var(--tx3);text-transform:uppercase;letter-spacing:.04em">Place</span>
+            <input type="number" placeholder="#" min="1" value="${e.placement||''}" style="width:50px;padding:4px 6px;font-size:12px;text-align:center" id="place-${e.id}">
+          </div>
+          <div style="display:flex;flex-direction:column;align-items:center;gap:2px">
+            <span style="font-size:10px;font-weight:600;color:var(--tx3);text-transform:uppercase;letter-spacing:.04em">Nationals</span>
+            <label class="tog" style="transform:scale(0.8);margin-top:2px" title="Nationals bid earned">
+              <input type="checkbox" ${e.nationals_bid?'checked':''} id="bid-${e.id}">
+              <span class="tsl"></span>
+            </label>
+          </div>
+          <button class="btn-sm" style="font-size:11px;align-self:flex-end" onclick="saveEntryResult('${e.id}','${id}')">Save</button>
+          <button class="btn-danger" style="align-self:flex-end" onclick="removeEntry('${e.id}','${id}')">×</button>
         </div>
       </div>`).join(''):'<div class="empty">No entries yet.</div>'}
     <div class="divider"></div>
