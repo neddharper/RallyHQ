@@ -259,7 +259,10 @@
 
         <div id="tab-signup" style="display:none">
           <div class="notice">Your account will be reviewed and activated by TRAP staff after signup.</div>
-          <div class="field" style="margin-bottom:10px"><label>Full name</label><input type="text" id="su-name" placeholder="Jane Smith"></div>
+          <div class="g2" style="margin-bottom:10px">
+            <div class="field"><label>First name</label><input type="text" id="su-firstname" placeholder="Jane"></div>
+            <div class="field"><label>Last name</label><input type="text" id="su-lastname" placeholder="Smith"></div>
+          </div>
           <div class="field" style="margin-bottom:10px"><label>Email</label><input type="email" id="su-email" placeholder="you@example.com"></div>
           <div class="field" style="margin-bottom:10px"><label>Password</label><input type="password" id="su-pass" placeholder="Min. 6 characters"></div>
           <div class="g2" style="margin-bottom:10px">
@@ -760,17 +763,19 @@ async function doLogin(){
   if(error)showErr(error.message);
 }
 async function doSignup(){
-  const name=document.getElementById('su-name').value.trim();
+  const firstName=document.getElementById('su-firstname').value.trim();
+  const lastName=document.getElementById('su-lastname').value.trim();
   const email=document.getElementById('su-email').value.trim();
   const pass=document.getElementById('su-pass').value;
   const division=document.getElementById('su-division').value;
   const dupr=document.getElementById('su-dupr').value;
-  if(!name||!email||!pass){showErr('Please fill in all required fields.');return;}
+  if(!firstName||!lastName||!email||!pass){showErr('Please fill in all required fields.');return;}
   if(pass.length<6){showErr('Password must be at least 6 characters.');return;}
+  const fullName=firstName+' '+lastName;
   clearMsg();
   const {data:authData,error}=await sb.auth.signUp({
     email,password:pass,
-    options:{data:{full_name:name,role:'member'}}
+    options:{data:{full_name:fullName,first_name:firstName,last_name:lastName,role:'member'}}
   });
   if(error){showErr(error.message);return;}
   // Create pending org membership
@@ -2711,7 +2716,7 @@ async function renderMemberProfile(){
   const profileHeader=`
     <div style="background:var(--navy);border-radius:var(--r3);padding:1.5rem;margin-bottom:1.25rem;display:flex;align-items:flex-start;gap:16px">
       <div style="width:60px;height:60px;border-radius:50%;background:var(--red);display:flex;align-items:center;justify-content:center;font-family:'Barlow Condensed',sans-serif;font-size:26px;font-weight:800;color:var(--white);flex-shrink:0">
-        ${(CP?.full_name||'?')[0].toUpperCase()}
+        ${(CP?.first_name||CP?.full_name||'?')[0].toUpperCase()}
       </div>
       <div style="flex:1">
         <div style="font-family:'Barlow Condensed',sans-serif;font-size:26px;font-weight:800;color:var(--white);margin-bottom:4px">${CP?.full_name||'User'}</div>
@@ -3380,9 +3385,13 @@ async function changePassword(){
 // ── MEMBER PROFILE EDIT ───────────────────────────────────────────────────────
 function openEditProfile(){
   openModal('Edit my profile',`
-    <div class="field" style="margin-bottom:10px">
-      <label>Full name</label>
-      <input type="text" id="ep-name" value="${CP?.full_name||''}">
+    <div class="g2" style="margin-bottom:10px">
+      <div class="field"><label>First name</label>
+        <input type="text" id="ep-firstname" value="${CP?.first_name||''}">
+      </div>
+      <div class="field"><label>Last name</label>
+        <input type="text" id="ep-lastname" value="${CP?.last_name||''}">
+      </div>
     </div>
     <div class="g2" style="margin-bottom:10px">
       <div class="field"><label>Division</label>
@@ -3416,10 +3425,16 @@ function openEditProfile(){
 }
 
 async function saveEditProfile(){
-  const name=document.getElementById('ep-name').value.trim();
-  if(!name){toast('Name cannot be empty.','error');return;}
-  // Update display name in profiles table
-  const {error:profileErr}=await sb.from('profiles').update({full_name:name}).eq('id',CU.id);
+  const firstName=document.getElementById('ep-firstname').value.trim();
+  const lastName=document.getElementById('ep-lastname').value.trim();
+  if(!firstName||!lastName){toast('First and last name cannot be empty.','error');return;}
+  const fullName=firstName+' '+lastName;
+  // Update profiles table with all three name fields
+  const {error:profileErr}=await sb.from('profiles').update({
+    first_name:firstName,
+    last_name:lastName,
+    full_name:fullName,
+  }).eq('id',CU.id);
   if(profileErr){toast('Error: '+profileErr.message,'error');return;}
   // Update division/DUPR in org_members
   const {error:omErr}=await sb.from('org_members').update({
@@ -3429,13 +3444,15 @@ async function saveEditProfile(){
   }).eq('id',OM.id);
   if(omErr){toast('Error: '+omErr.message,'error');return;}
   // Update local state
-  CP.full_name=name;
+  CP.first_name=firstName;
+  CP.last_name=lastName;
+  CP.full_name=fullName;
   OM.division=document.getElementById('ep-division').value||null;
   OM.dupr_rating=document.getElementById('ep-dupr').value?parseFloat(document.getElementById('ep-dupr').value):null;
   OM.dupr_range=document.getElementById('ep-dupr-range').value||null;
   // Refresh header name chip
   const nameEl=document.getElementById('hd-name');
-  if(nameEl)nameEl.textContent=name;
+  if(nameEl)nameEl.textContent=fullName;
   closeModal();
   renderMemberProfile();
   toast('Profile updated!');
