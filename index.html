@@ -1782,13 +1782,17 @@ async function addBookingManual(sessionId){
   const {error}=await sb.from('session_bookings').insert({session_id:sessionId,user_id:userId});
   if(error&&error.code!=='23505'){toast('Error: '+error.message,'error');return;}
   delete memberSearchSelected['ms-member-search'];
-  closeModal();openManageSession(sessionId);
+  closeModal();
+  openManageSession(sessionId);
+  renderAdminSessions();
 }
 
 async function removeBooking(bookingId,sessionId){
   if(!confirm('Remove this booking?'))return;
   await sb.from('session_bookings').delete().eq('id',bookingId);
-  closeModal();openManageSession(sessionId);
+  closeModal();
+  openManageSession(sessionId);
+  renderAdminSessions();
 }
 
 async function addCoach(sessionId){
@@ -1816,7 +1820,7 @@ async function promoteFromWaitlist(waitlistId,sessionId,userId){
   for(let i=0;i<(remaining||[]).length;i++){
     await sb.from('session_waitlist').update({position:i+1}).eq('id',remaining[i].id);
   }
-  closeModal();openManageSession(sessionId);
+  closeModal();openManageSession(sessionId);renderAdminSessions();
 }
 
 async function removeFromWaitlist(waitlistId,sessionId){
@@ -1826,7 +1830,7 @@ async function removeFromWaitlist(waitlistId,sessionId){
   for(let i=0;i<(remaining||[]).length;i++){
     await sb.from('session_waitlist').update({position:i+1}).eq('id',remaining[i].id);
   }
-  closeModal();openManageSession(sessionId);
+  closeModal();openManageSession(sessionId);renderAdminSessions();
 }
 
 async function openEditSession(sessionId){
